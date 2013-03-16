@@ -491,7 +491,20 @@ func (rows *mysqlRows) readRow(dest []driver.Value) (err error) {
 		pos += n
 		if err == nil {
 			if !isNull {
-				continue
+				switch rows.columns[i].fieldType {
+				case fieldTypeTimestamp, fieldTypeDateTime:
+					dest[i], err = time.Parse(timeFormat, string(dest[i].([]byte)))
+					if err == nil {
+						continue
+					}
+				case fieldTypeDate, fieldTypeNewDate:
+					dest[i], err = time.Parse(timeFormat[:10], string(dest[i].([]byte)))
+					if err == nil {
+						continue
+					}
+				default:
+					continue
+				}
 			} else {
 				dest[i] = nil
 				continue
@@ -802,8 +815,9 @@ func (rc *mysqlRows) readBinaryRow(dest []driver.Value) (err error) {
 			}
 			return // err
 
-		// Date YYYY-MM-DD
-		case fieldTypeDate, fieldTypeNewDate:
+		// Date YYYY-MM-DD, Timestamp YYYY-MM-DD HH:MM:SS[.fractal]
+		case fieldTypeDate, fieldTypeNewDate,
+			fieldTypeTimestamp, fieldTypeDateTime:
 			var num uint64
 			var isNull bool
 			num, isNull, n = readLengthEncodedInteger(data[pos:])
@@ -815,16 +829,50 @@ func (rc *mysqlRows) readBinaryRow(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				} else {
-					dest[i] = []byte("0000-00-00")
+					dest[i] = time.Time{}
 					continue
 				}
-			} else {
-				dest[i] = []byte(fmt.Sprintf("%04d-%02d-%02d",
-					binary.LittleEndian.Uint16(data[pos:pos+2]),
-					data[pos+2],
-					data[pos+3]))
-				pos += int(num)
+			}
+
+			switch num {
+			case 4:
+				dest[i] = time.Date(
+					int(binary.LittleEndian.Uint16(data[pos:pos+2])), // year
+					time.Month(data[pos+2]),                          // month
+					int(data[pos+3]),                                 // day
+					0, 0, 0, 0,
+					rc.mc.cfg.loc,
+				)
+				pos += 4
 				continue
+			case 7:
+				dest[i] = time.Date(
+					int(binary.LittleEndian.Uint16(data[pos:pos+2])), // year
+					time.Month(data[pos+2]),                          // month
+					int(data[pos+3]),                                 // day
+					int(data[pos+4]),                                 // hour
+					int(data[pos+5]),                                 // minutes
+					int(data[pos+6]),                                 // seconds
+					0,
+					rc.mc.cfg.loc,
+				)
+				pos += 7
+				continue
+			case 11:
+				dest[i] = time.Date(
+					int(binary.LittleEndian.Uint16(data[pos:pos+2])),         // year
+					time.Month(data[pos+2]),                                  // month
+					int(data[pos+3]),                                         // day
+					int(data[pos+4]),                                         // hour
+					int(data[pos+5]),                                         // minutes
+					int(data[pos+6]),                                         // seconds
+					int(binary.LittleEndian.Uint32(data[pos+7:pos+11]))*1000, // nanoseconds
+					rc.mc.cfg.loc,
+				)
+				pos += 11
+				continue
+			default:
+				return fmt.Errorf("Invalid DATETIME-packet length %d", num)
 			}
 
 		// Time [-][H]HH:MM:SS[.fractal]
@@ -874,63 +922,6 @@ func (rc *mysqlRows) readBinaryRow(dest []driver.Value) (err error) {
 				continue
 			default:
 				return fmt.Errorf("Invalid TIME-packet length %d", num)
-			}
-
-		// Timestamp YYYY-MM-DD HH:MM:SS[.fractal]
-		case fieldTypeTimestamp, fieldTypeDateTime:
-			var num uint64
-			var isNull bool
-			num, isNull, n = readLengthEncodedInteger(data[pos:])
-
-			pos += n
-
-			if num == 0 {
-				if isNull {
-					dest[i] = nil
-					continue
-				} else {
-					dest[i] = []byte("0000-00-00 00:00:00")
-					continue
-				}
-			}
-
-			switch num {
-			case 4:
-				dest[i] = []byte(fmt.Sprintf(
-					"%04d-%02d-%02d 00:00:00",
-					binary.LittleEndian.Uint16(data[pos:pos+2]),
-					data[pos+2],
-					data[pos+3],
-				))
-				pos += 4
-				continue
-			case 7:
-				dest[i] = []byte(fmt.Sprintf(
-					"%04d-%02d-%02d %02d:%02d:%02d",
-					binary.LittleEndian.Uint16(data[pos:pos+2]),
-					data[pos+2],
-					data[pos+3],
-					data[pos+4],
-					data[pos+5],
-					data[pos+6],
-				))
-				pos += 7
-				continue
-			case 11:
-				dest[i] = []byte(fmt.Sprintf(
-					"%04d-%02d-%02d %02d:%02d:%02d.%06d",
-					binary.LittleEndian.Uint16(data[pos:pos+2]),
-					data[pos+2],
-					data[pos+3],
-					data[pos+4],
-					data[pos+5],
-					data[pos+6],
-					binary.LittleEndian.Uint32(data[pos+7:pos+11]),
-				))
-				pos += 11
-				continue
-			default:
-				return fmt.Errorf("Invalid DATETIME-packet length %d", num)
 			}
 
 		// Please report if this happens!

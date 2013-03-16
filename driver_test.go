@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 )
 
 var (
@@ -351,19 +352,26 @@ func TestDateTime(t *testing.T) {
 
 	types := [...]string{"DATE", "DATETIME"}
 	in := [...]string{"2012-06-14", "2011-11-20 21:27:37"}
-	var out string
+	var tIn, out time.Time
 	var rows *sql.Rows
 
 	for i, v := range types {
-		mustExec(t, db, "CREATE TABLE test (value "+v+") CHARACTER SET utf8 COLLATE utf8_unicode_ci")
+		tIn, err = time.Parse(timeFormat[:len(in[i])], in[i])
+		if err != nil {
+			t.Error(err.Error())
+		}
 
-		mustExec(t, db, ("INSERT INTO test VALUES (?)"), in[i])
+		mustExec(t, db, "CREATE TABLE test (value "+v+")")
+		mustExec(t, db, ("INSERT INTO test VALUES (?)"), tIn)
 
 		rows = mustQuery(t, db, ("SELECT value FROM test"))
 		if rows.Next() {
 			rows.Scan(&out)
-			if in[i] != out {
-				t.Errorf("%s: %s != %s", v, in[i], out)
+			if tIn.String() != out.String() {
+				t.Errorf("%s: %s != %s", v, tIn.String(), out.String())
+			}
+			if out.IsZero() {
+				t.Errorf("%s: Unexpected Zero Time", v)
 			}
 		} else {
 			t.Errorf("%s: no data", v)
@@ -371,6 +379,18 @@ func TestDateTime(t *testing.T) {
 
 		mustExec(t, db, "DROP TABLE IF EXISTS test")
 	}
+
+	// Zero Time
+	mustExec(t, db, "CREATE TABLE test (value DATETIME)")
+	mustExec(t, db, ("INSERT INTO test VALUES (?)"), "0000-00-00 00:00:00")
+	err = db.QueryRow("SELECT value FROM test").Scan(&out)
+	if err != nil {
+		t.Error(err.Error())
+	}
+	if !out.IsZero() {
+		t.Error("Default Time not zero")
+	}
+	mustExec(t, db, "DROP TABLE IF EXISTS test")
 }
 
 func TestNULL(t *testing.T) {

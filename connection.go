@@ -14,6 +14,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"time"
 )
 
 type mysqlConn struct {
@@ -36,6 +37,7 @@ type config struct {
 	addr   string
 	dbname string
 	params map[string]string
+	loc    *time.Location
 }
 
 // Handles parameters set in DSN
@@ -52,8 +54,8 @@ func (mc *mysqlConn) handleParams() (err error) {
 				}
 			}
 
-		// Timeout - already handled on connecting
-		case "timeout":
+		// Timeout or Location- already handled on connecting
+		case "timeout", "loc":
 			continue
 
 		// TLS-Encryption

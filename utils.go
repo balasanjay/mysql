@@ -16,6 +16,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Logger
@@ -36,8 +37,8 @@ func init() {
 // Data Source Name Parser
 var dsnPattern *regexp.Regexp
 
-func parseDSN(dsn string) *config {
-	cfg := new(config)
+func parseDSN(dsn string) (cfg *config, err error) {
+	cfg = new(config)
 	cfg.params = make(map[string]string)
 
 	matches := dsnPattern.FindStringSubmatch(dsn)
@@ -76,7 +77,9 @@ func parseDSN(dsn string) *config {
 		cfg.addr = "127.0.0.1:3306"
 	}
 
-	return cfg
+	cfg.loc, err = time.LoadLocation(cfg.params["loc"])
+
+	return
 }
 
 // Encrypt password using 4.1+ method

@@ -25,7 +25,10 @@ func (d *mysqlDriver) Open(dsn string) (driver.Conn, error) {
 
 	// New mysqlConn
 	mc := new(mysqlConn)
-	mc.cfg = parseDSN(dsn)
+	mc.cfg, err = parseDSN(dsn)
+	if err != nil {
+		return nil, err
+	}
 
 	// Connect to Server
 	if _, ok := mc.cfg.params["timeout"]; ok { // with timeout
